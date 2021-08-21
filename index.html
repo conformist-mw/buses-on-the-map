@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang=ru>
+<head>
+  <meta charset="utf-8">
+  <title>Автобусы на карте</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.5.1/dist/leaflet.css" integrity="sha512-xwE/Az9zrjBIphAcBb3F6JVqxf46+CDLwfLMHloNu6KEQCAWi6HcDUbeOfBIptF7tcCzusKFjFw2yuvEpDL9wQ==" crossorigin=""/>
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.5.0/css/font-awesome.min.css">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <link href="https://unpkg.com/beautifymarker@1.0.7/leaflet-beautify-marker-icon.css" rel="stylesheet">
+
+
+  <style type="text/css">
+    body {
+      padding: 0;
+      margin: 0;
+    }
+    html, body, #mapid {
+      height: 100%;
+      width: 100vw;
+    }
+  </style>
+</head>
+<body>
+  <div id="mapid"></div>
+
+  <script src="https://unpkg.com/leaflet@1.5.1/dist/leaflet.js" integrity="sha512-GffPMF3RvMeYyc1LWMHtK8EbPv0iNZ8/oTtHPx9/cc2ILxQ+u905qIwdpULaqDkyBKgOaB57QTMg7ztg8Jm2Og==" crossorigin=""></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-providers/1.9.0/leaflet-providers.min.js" integrity="sha256-DeMZ/oWlg1cLllekEAI8FfVwhvE2Qsuac66qMoo6vzw=" crossorigin="anonymous"></script>
+  <script src='https://unpkg.com/leaflet.marker.slideto@0.2.0/Leaflet.Marker.SlideTo.js'></script>
+  <script src="https://unpkg.com/beautifymarker@1.0.7/leaflet-beautify-marker-icon.js"></script>
+  <script src="https://unpkg.com/leaflet-control-custom@1.0.0/Leaflet.Control.Custom.js"></script>
+
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/loglevel/1.6.4/loglevel.min.js" integrity="sha256-ACTlnmNCkOooSKkPCKYbiex8WLE82aeiN+Z9ElZag5Q=" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/validate.js/0.13.1/validate.min.js" integrity="sha256-xgP6yiUGsRLSmsC8oW0KrRWiK2ek7cSBznIDMEcdp/U=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lodash@4.17.15/lodash.min.js"></script>
+
+  <script type="text/javascript">
+    const serverUpdateMsgScheme = {
+      msgType: {presence: true, type: 'string', format: /Buses/},
+      buses: {presence: true, type: 'array'},
+    };
+    const busInfoScheme = {
+      busId: {presence: true},
+      lat: {presence: true, type: 'number'},
+      lng: {presence: true, type: 'number'},
+      route: {},
+    };
+
+    function validateServerUpdateMsg(jsonData){
+      const errors = validate(jsonData, serverUpdateMsgScheme);
+
+      if (errors){
+        log.error('Server message format is broken. Check out errors:', errors);
+        log.info('Following message data was received:', jsonData);
+        return false;
+      }
+
+      for (let busInfo of jsonData.buses){
+        const errors = validate(busInfo, busInfoScheme);
+        if (errors){
+          log.error('Server message format is broken. Check out bus info errors:', errors);
+          log.info('Following bus info was received:', busInfo);
+          return false;
+        }
+      }
+
+      return true;
+    }
+  </script>
+  <script type="text/javascript">
+    class WebsocketClosed extends Error {
+        constructor() {
+          super('WebsocketClosed');
+        }
+    };
+
+    async function waitTillSocketOpen(webSocket){
+      return new Promise((resolve, reject) => {
+        const onSocketClose = ()=>{
+          reject(new WebsocketClosed());
+          webSocket.removeEventListener('open', onWebsocketOpen);
+        }
+
+        const onWebsocketOpen = event => {
+          resolve();
+          webSocket.removeEventListener('close', onSocketClose);
+        }
+        webSocket.addEventListener('close', onSocketClose);
+        webSocket.addEventListener('open', onWebsocketOpen);
+      });
+    }
+
+    async function waitForIncomeMsg(webSocket){
+      return new Promise((resolve, reject) => {
+        const onSocketClose = ()=>{
+          reject(new WebsocketClosed());
+          webSocket.removeEventListener('message', onMsgReceive);
+        }
+
+        const onMsgReceive = event => {
+          resolve(event.data);
+          webSocket.removeEventListener('close', onSocketClose);
+        }
+        webSocket.addEventListener('close', onSocketClose);
+        webSocket.addEventListener('message', onMsgReceive);
+      });
+    }
+  </script>
+  <script type="text/javascript">
+    const websocketAddress = localStorage.getItem('websocket') || 'ws://127.0.0.1:8000/ws';
+    log.info(`Websocket address is ${websocketAddress}`);
+
+    const centerOfMoscow = [55.75, 37.6];
+    var map = L.map('mapid', {
+      minZoom: 14,  // автобусов слишком много, нельзя смотреть всю Москву разом
+    }).setView(centerOfMoscow, 14);
+
+    L.tileLayer.provider('OpenStreetMap.Mapnik').addTo(map);
+
+    L.control.custom({
+        position: 'bottomright',
+        content: `<input name="address" type="text" value="${websocketAddress}"/>`+
+                 '<button type="button" class="btn btn-info" id="save-btn">Сохранить</button>' +
+                 '<br/>' +
+                 `<label>` +
+                   `<input name="debug" type="checkbox" ${log.getLevel()<=1 && 'checked'}/>` +
+                 'отладка' +
+                 '</label>',
+        classes: 'btn-group-vertical btn-group-sm',
+        style: {
+          padding: '10px',
+          background: 'rgba(255, 255, 255, 0.7)',
+        },
+        events:
+        {
+          click: function(event)
+          {
+            if (event.target.name == 'debug'){
+              log.setLevel(event.target.checked && 'debug' || 'warn');
+            }
+
+            if (event.target.id == 'save-btn'){
+              const newWebsocketAddress = document.getElementsByName("address")[0].value;
+              localStorage.setItem('websocket', newWebsocketAddress)
+              document.location.reload();
+            }
+          },
+        }
+    })
+    .addTo(map);
+
+    const busMarkers = {};
+
+    function drawBusMarker(latLng, routeNumber='???', busId='???'){
+      const icon = L.BeautifyIcon.icon({
+          isAlphaNumericIcon: true,
+          text: '' + routeNumber,
+          iconShape: 'marker',
+          iconSize: [40, 40],
+          iconAnchor: [20, 47],
+          innerIconAnchor: [-5, 7],
+          borderColor: '#00ABDC',
+          textColor: '#00ABDC',
+      });
+      const marker = L.marker(latLng, { icon: icon })
+      marker.addTo(map);
+      marker.bindPopup(`<p>Маршрут №<strong>${routeNumber}</strong>.<br/>Id автобуса ${busId}.</p>`);
+      return marker;
+    }
+
+    async function sleep(delay){
+      return new Promise((resolve, reject) => {
+        setTimeout(resolve, delay);
+      });
+    }
+
+    function sendBounds(socket, bounds){
+      const msg = {
+        'msgType': 'newBounds',
+        'data': {
+          'south_lat': bounds._southWest.lat,
+          'north_lat': bounds._northEast.lat,
+          'west_lng': bounds._southWest.lng,
+          'east_lng': bounds._northEast.lng,
+        },
+      };
+      socket.send(JSON.stringify(msg));
+      log.debug('Send new bounds to the server', msg);
+    }
+
+    function displayBuses(buses){
+      for (let bus of buses){
+
+        const busIdStr = '' + bus.busId;
+
+        let marker = busMarkers[busIdStr];
+        if (!marker){
+          log.debug(`Place new bus #${busIdStr} on the map. Route ${bus.route}`);
+          marker = drawBusMarker([bus.lat, bus.lng], bus.route, bus.busId);
+          busMarkers[busIdStr] = marker;
+        }
+        marker.slideTo([bus.lat, bus.lng], {
+          duration: 500,
+        });
+      }
+
+      const visibleBusIds = new Set(buses.map(bus => '' + bus.busId));
+      const drivenAwayBusIds = Object.keys(busMarkers).filter(busId => !visibleBusIds.has(busId));
+
+      for (let busId of drivenAwayBusIds){
+        log.debug(`Bus #${busId} has driven out of the map.`);
+        busMarkers[busId].remove();
+        delete busMarkers[busId];
+      }
+    }
+
+    async function trackBuses(socket){
+      while (true){
+        const msgJSON = await waitForIncomeMsg(socket);
+
+        try {
+          var msgData = JSON.parse(msgJSON);
+        } catch (error) {
+          log.error(`Expect JSON from server, but receive:`, msgJSON);
+          continue;
+        }
+
+        if (msgData.msgType == 'Buses'){
+          if (!validateServerUpdateMsg(msgData)){
+            return;
+          }
+          log.debug('Receive bus positions update from server', msgData);
+          displayBuses(msgData.buses);
+        } else {
+          log.error('Unknown server message received', msgData);
+        }
+      }
+    }
+
+    async function listenSocket(){
+      const socket = new WebSocket(websocketAddress);
+
+      await waitTillSocketOpen(socket);
+
+      log.info('Websocket connection established');
+
+      const sendBoundsToServer = _.debounce(()=>{
+        const newBounds = map.getBounds();
+        sendBounds(socket, newBounds);
+      }, 100)
+
+      map.on('zoomend moveend', sendBoundsToServer);
+      sendBoundsToServer();
+
+      try {
+        await trackBuses(socket);
+      } finally {
+        map.off('zoomend moveend', sendBoundsToServer);
+      }
+    }
+
+    async function listenSocketWithReconnects(){
+      while (true){
+        try {
+          await listenSocket();
+
+        } catch (error){
+          if (error instanceof WebsocketClosed){
+            log.info('Connection lost. Try to reconnect in 1 sec.')
+            await sleep(1000);
+            continue;
+          }
+
+          throw error;
+        }
+      }
+    }
+
+    listenSocketWithReconnects();
+
+  </script>
+</body>
+</html>

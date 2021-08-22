@@ -9,7 +9,7 @@ from trio_websocket import ConnectionClosed, serve_websocket
 
 # noinspection PyArgumentList
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='{asctime} - {levelname} - {message}',
     style='{',
 )

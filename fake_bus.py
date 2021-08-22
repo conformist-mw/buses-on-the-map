@@ -11,7 +11,7 @@ from utils import load_routes
 
 # noinspection PyArgumentList
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='{asctime} - {levelname} - {message}',
     style='{',
 )
@@ -35,13 +35,10 @@ async def run_bus(sender, bus_id, route):
 
 
 async def send_updates(server_url, receiver):
-    try:
-        async with open_websocket_url(server_url) as ws:
-            while True:
-                msg = await receiver.receive()
-                await ws.send_message(msg)
-    except OSError as ose:
-        logger.warning('Connection attempt failed: %s' % ose)
+    async with open_websocket_url(server_url) as ws:
+        while True:
+            msg = await receiver.receive()
+            await ws.send_message(msg)
 
 
 async def main():
@@ -52,7 +49,7 @@ async def main():
             nursery.start_soon(send_updates, 'ws://localhost:8080', receiver)
             senders.append(sender)
         for route in load_routes('routes'):
-            for index in range(randint(100, 150)):
+            for index in range(randint(1, 2)):
                 sender = choice(senders)
                 nursery.start_soon(
                     run_bus,

@@ -2,11 +2,12 @@ import argparse
 import json
 import logging
 from contextlib import suppress
+from functools import wraps
 from itertools import cycle
 from random import choice, randint
 
 import trio
-from trio_websocket import open_websocket_url
+from trio_websocket import ConnectionClosed, HandshakeError, open_websocket_url
 
 from utils import load_routes
 
@@ -59,11 +60,24 @@ def parse_args():
     )
     parser.add_argument(
         '-v', '--verbose',
-        choices=(x * 10 for x in range(1, 6)),
+        type=int,
+        choices=[x * 10 for x in range(1, 6)],
         default=logging.INFO,
         help='set logging level (10, 20, 30, 40, 50)',
     )
     return parser.parse_args()
+
+
+def relaunch_on_disconnect(async_function):
+    @wraps(async_function)
+    async def wrapped(*args, **kwargs):
+        while True:
+            try:
+                await async_function(*args, **kwargs)
+            except (ConnectionClosed, HandshakeError):
+                logger.debug('send_updates reconnect')
+                await trio.sleep(3)
+    return wrapped
 
 
 async def run_bus(sender, bus_id, route, refresh_timeout):
@@ -82,6 +96,7 @@ async def run_bus(sender, bus_id, route, refresh_timeout):
         await trio.sleep(refresh_timeout)
 
 
+@relaunch_on_disconnect
 async def send_updates(server_url, receiver):
     async with open_websocket_url(server_url) as ws:
         while True:
@@ -91,6 +106,7 @@ async def send_updates(server_url, receiver):
 
 async def main():
     args = parse_args()
+    logger.setLevel(args.verbose)
     async with trio.open_nursery() as nursery:
         senders = []
         for _ in range(args.websockets_count):

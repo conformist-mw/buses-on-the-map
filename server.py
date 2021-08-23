@@ -7,6 +7,8 @@ from time import monotonic
 import trio
 from trio_websocket import ConnectionClosed, serve_websocket
 
+from models import Bus, BusEncoder, WindowBounds
+
 # noinspection PyArgumentList
 logging.basicConfig(
     level=logging.INFO,
@@ -19,15 +21,6 @@ sender, receiver = trio.open_memory_channel(0)
 bounds_sender, bounds_receiver = trio.open_memory_channel(0)
 
 
-def is_inside(bounds, lat, lng):
-    if bounds is None:  # have not yet received data from the browser
-        return True
-    return (
-        (bounds['south_lat'] < lat < bounds['north_lat'])
-        and (bounds['west_lng'] < lng < bounds['east_lng'])
-    )
-
-
 async def listen_browser(ws):
     while True:
         msg = json.loads(await ws.get_message())
@@ -37,24 +30,21 @@ async def listen_browser(ws):
 
 
 async def send_to_browser(ws):
-    start, buses, bounds = monotonic(), [], None
+    start, buses, bounds = monotonic(), [], WindowBounds()
     while True:
-        try:
-            try:
-                bounds = bounds_receiver.receive_nowait()
-            except trio.WouldBlock:
-                pass
+        with suppress(ConnectionClosed):
+            with suppress(trio.WouldBlock):
+                bounds_coords = bounds_receiver.receive_nowait()
+                bounds = WindowBounds(**bounds_coords)
             bus = await receiver.receive()
-            if is_inside(bounds, bus['lat'], bus['lng']):
+            if bounds.is_inside(bus):
                 buses.append(bus)
             if (monotonic() - start) > 1:
                 await ws.send_message(json.dumps({
                     'msgType': 'Buses',
                     'buses': buses,
-                }))
+                }, cls=BusEncoder))
                 start, buses = monotonic(), []
-        except ConnectionClosed:
-            break
 
 
 async def interact_with_browser(request):
@@ -69,7 +59,7 @@ async def listen_fake_events(request):
     while True:
         try:
             message = await ws.get_message()
-            await sender.send(json.loads(message))
+            await sender.send(Bus.from_json(message))
         except ConnectionClosed:
             break
 

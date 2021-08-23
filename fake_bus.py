@@ -1,3 +1,4 @@
+import argparse
 import json
 import logging
 from contextlib import suppress
@@ -18,7 +19,54 @@ logging.basicConfig(
 logger = logging.getLogger(__file__)
 
 
-async def run_bus(sender, bus_id, route):
+def parse_args():
+    parser = argparse.ArgumentParser(description='Options for load testing')
+    parser.add_argument(
+        '--server',
+        help='websocket server address',
+        default='ws://localhost:8080',
+    )
+    parser.add_argument(
+        '--routes_number',
+        type=int,
+        default=10,
+        choices=range(1, 100),
+        help='how many routes will be loaded',
+    )
+    parser.add_argument(
+        '--buses_per_route',
+        type=int,
+        default=5,
+        help='generate routes with offset',
+    )
+    parser.add_argument(
+        '--websockets_count',
+        type=int,
+        default=10,
+        choices=range(1, 50),
+        help='how many websockets will be opened',
+    )
+    parser.add_argument(
+        '--emulator_id',
+        default='1',
+        help='busId prefix if multiple fake_bus instances running',
+    )
+    parser.add_argument(
+        '--refresh_timeout',
+        type=float,
+        default=1.0,
+        help='timeout between sending new coordinates',
+    )
+    parser.add_argument(
+        '-v', '--verbose',
+        choices=(x * 10 for x in range(1, 6)),
+        default=logging.INFO,
+        help='set logging level (10, 20, 30, 40, 50)',
+    )
+    return parser.parse_args()
+
+
+async def run_bus(sender, bus_id, route, refresh_timeout):
     coordinates = route['coordinates']
     rand_offset = randint(0, len(coordinates) - 1)
     route_with_offset = cycle(
@@ -31,7 +79,7 @@ async def run_bus(sender, bus_id, route):
             'lng': lng,
             'route': bus_id,
         }, ensure_ascii=False))
-        await trio.sleep(1)
+        await trio.sleep(refresh_timeout)
 
 
 async def send_updates(server_url, receiver):
@@ -42,20 +90,24 @@ async def send_updates(server_url, receiver):
 
 
 async def main():
+    args = parse_args()
     async with trio.open_nursery() as nursery:
         senders = []
-        for _ in range(10):
+        for _ in range(args.websockets_count):
             sender, receiver = trio.open_memory_channel(0)
-            nursery.start_soon(send_updates, 'ws://localhost:8080', receiver)
+            nursery.start_soon(send_updates, args.server, receiver)
             senders.append(sender)
-        for route in load_routes('routes'):
-            for index in range(randint(1, 2)):
+        for routes_index, route in enumerate(load_routes('routes')):
+            if routes_index >= args.routes_number:
+                break
+            for index in range(args.buses_per_route):
                 sender = choice(senders)
                 nursery.start_soon(
                     run_bus,
                     sender,
-                    f"{route['name']}-{index}",
+                    f"{args.emulator_id}-{route['name']}-{index}",
                     route,
+                    args.refresh_timeout,
                 )
 
 

@@ -23,6 +23,11 @@ class WindowBounds:
     south_lat: float = 0
     north_lat: float = 0
 
+    def update(self, new):
+        for key, value in new.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+
     def is_inside(self, bus):
         # have not yet received data from the browser
         if not any(asdict(self).values()):

@@ -16,7 +16,7 @@ logger = logging.getLogger('harmful_client')
 
 async def send_harmful_messages(server_url):
     async with open_websocket_url(server_url) as ws:
-        for msg in ['', '{}', 'null']:
+        for msg in ('', '{}', 'null'):  # noqa: P103
             await ws.send_message(msg)
             response = json.loads(await ws.get_message())
             logger.debug(response)

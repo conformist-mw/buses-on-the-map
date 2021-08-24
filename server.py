@@ -29,13 +29,13 @@ class EmptyMessage(Exception):
 def parse_args():
     parser = argparse.ArgumentParser(description='Options for websocket proxy')
     parser.add_argument(
-        '--bus_port',
+        '--bus-port',
         type=int,
         help='port to receive fake data',
         default=8080,
     )
     parser.add_argument(
-        '--browser_port',
+        '--browser-port',
         type=int,
         default=8000,
         help='port to communicate with browser',

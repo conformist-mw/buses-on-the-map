@@ -28,32 +28,32 @@ def parse_args():
         default='ws://localhost:8080',
     )
     parser.add_argument(
-        '--routes_number',
+        '--routes-number',
         type=int,
         default=10,
         choices=range(1, 100),
         help='how many routes will be loaded',
     )
     parser.add_argument(
-        '--buses_per_route',
+        '--buses-per-route',
         type=int,
         default=5,
         help='generate routes with offset',
     )
     parser.add_argument(
-        '--websockets_count',
+        '--websockets-count',
         type=int,
         default=10,
         choices=range(1, 50),
         help='how many websockets will be opened',
     )
     parser.add_argument(
-        '--emulator_id',
+        '--emulator-id',
         default='1',
         help='busId prefix if multiple fake_bus instances running',
     )
     parser.add_argument(
-        '--refresh_timeout',
+        '--refresh-timeout',
         type=float,
         default=1.0,
         help='timeout between sending new coordinates',

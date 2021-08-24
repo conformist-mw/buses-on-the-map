@@ -3,7 +3,6 @@ import json
 import logging
 from contextlib import suppress
 from functools import partial
-from time import monotonic
 
 import trio
 from trio_websocket import ConnectionClosed, serve_websocket
@@ -13,16 +12,13 @@ from models import Bus, BusEncoder, WindowBounds
 # noinspection PyArgumentList
 logging.basicConfig(
     level=logging.INFO,
-    format='{asctime} - {levelname} - {message} : {lineno}',
+    format='{asctime} - {levelname} - {message} - {filename}:{lineno}',
     style='{',
 )
 logger = logging.getLogger(__file__)
 
-sender, receiver = trio.open_memory_channel(0)
-bounds_sender, bounds_receiver = trio.open_memory_channel(0)
 
-
-class EmptyMessage(Exception):
+class EmptyMessageError(Exception):
     ...
 
 
@@ -56,14 +52,17 @@ async def check_message(encoded_message):
     try:
         message = json.loads(encoded_message)
         if message is None:
-            raise EmptyMessage
-        if isinstance(message, dict) and 'msgType' not in message:
+            raise EmptyMessageError
+        if (
+            isinstance(message, dict)
+            and not {'busId', 'msgType'} & set(message.keys())
+        ):
             raise KeyError
     except json.JSONDecodeError:
         error_msg = 'Requires valid JSON'
     except KeyError:
-        error_msg = 'Requires msgType specified'
-    except EmptyMessage:
+        error_msg = 'Requires msgType or busId specified'
+    except EmptyMessageError:
         error_msg = 'Message is null'
 
     return message, error_msg
@@ -78,7 +77,7 @@ async def send_error(ws, error_message, source_message):
     await ws.send_message(error)
 
 
-async def listen_to_browser(ws):
+async def listen_to_browser(ws, bounds):
     while True:
         try:
             encoded_message = await ws.get_message()
@@ -88,37 +87,34 @@ async def listen_to_browser(ws):
                 await send_error(ws, error_message, encoded_message)
                 continue
             if message['msgType'] == WindowBounds.msg_type:
-                await bounds_sender.send(message['data'])
+                bounds.update(message['data'])
         except ConnectionClosed:
             logger.debug('listen_to_browser: connection closed')
             break
 
-async def send_to_browser(ws):
-    start, buses, bounds = monotonic(), [], WindowBounds()
+
+async def send_to_browser(ws, buses: dict, bounds):
     while True:
         with suppress(ConnectionClosed):
-            with suppress(trio.WouldBlock):
-                bounds_coords = bounds_receiver.receive_nowait()
-                bounds.update(bounds_coords)
-            bus = await receiver.receive()
-            if bounds.is_inside(bus):
-                buses.append(bus)
-            if (monotonic() - start) > 1:
+            inbound_buses = [
+                bus for bus in buses.values() if bounds.is_inside(bus)
+            ]
+            if inbound_buses:
                 await ws.send_message(json.dumps({
                     'msgType': 'Buses',
-                    'buses': buses,
+                    'buses': inbound_buses,
                 }, cls=BusEncoder))
-                start, buses = monotonic(), []
+            await trio.sleep(0)
 
 
-async def interact_with_browser(request):
+async def interact_with_browser(request, buses, bounds):
     ws = await request.accept()
     async with trio.open_nursery() as nursery:
-        nursery.start_soon(send_to_browser, ws)
-        nursery.start_soon(listen_to_browser, ws)
+        nursery.start_soon(send_to_browser, ws, buses, bounds)
+        nursery.start_soon(listen_to_browser, ws, bounds)
 
 
-async def listen_fake_events(request):
+async def listen_fake_events(request, buses):
     ws = await request.accept()
     while True:
         try:
@@ -128,20 +124,23 @@ async def listen_fake_events(request):
             if error_message:
                 await send_error(ws, error_message, encoded_message)
                 continue
-            await sender.send(Bus(**message))
+            bus = Bus(**message)
+            buses[bus.busId] = bus
         except ConnectionClosed:
             logger.debug('listen_fake_events: connection closed')
             break
 
 
 async def main():
+    buses = {}
+    bounds = WindowBounds()
     args = parse_args()
     logger.setLevel(args.verbose)
     async with trio.open_nursery() as nursery:
         nursery.start_soon(
             partial(
                 serve_websocket,
-                interact_with_browser,
+                partial(interact_with_browser, buses=buses, bounds=bounds),
                 '127.0.0.1',
                 args.browser_port,
                 ssl_context=None,
@@ -150,7 +149,7 @@ async def main():
         nursery.start_soon(
             partial(
                 serve_websocket,
-                listen_fake_events,
+                partial(listen_fake_events, buses=buses),
                 '127.0.0.1',
                 args.bus_port,
                 ssl_context=None,

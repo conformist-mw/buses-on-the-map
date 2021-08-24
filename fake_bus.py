@@ -31,7 +31,7 @@ def parse_args():
         '--routes-number',
         type=int,
         default=10,
-        choices=range(1, 100),
+        choices=range(1, 600),
         help='how many routes will be loaded',
     )
     parser.add_argument(

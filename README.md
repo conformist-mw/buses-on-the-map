@@ -1,28 +1,63 @@
-# Автобусы на карте Москвы
+# Buses on the City Map
 
-Веб-приложение показывает передвижение автобусов на карте Москвы.
+The application shows the movement of buses on the map in real-time.
 
 ![buses](https://user-images.githubusercontent.com/13550539/130320606-9f578e72-63aa-4e33-8574-9b210c91e57a.gif)
 
-## Как запустить
+### How to run
 
-- Скачайте код
-- Откройте в браузере файл index.html
+#### Installation
+
+```shell
+pip install -r requirements.txt
+```
+
+#### Server
+
+```shell
+python server.py
+```
+
+Possible options:
+
+```shell
+--bus-port  # port for fake_bus.py generator
+--browser-port  # port to communicate with browser
+--verbose  # to increase logging level
+```
+
+#### Fake buses (to generate events)
+
+```shell
+python fake_bus.py
+```
+
+Possible options:
+
+```shell
+--server  # websocket server address
+--routes-number  # how many routes will be loaded
+--buses-per-route  # generate routes with offset
+--websockets-count  # how many websockets will be opened
+--emulator-id  # busId prefix if multiple fake_bus instances running
+--refresh-timeout  # timeout between sending new coordinates
+--verbose  # to increase logging level
+```
 
 
-## Настройки
+### Settings
 
-Внизу справа на странице можно включить отладочный режим логгирования и указать нестандартный адрес веб-сокета.
+You can enable debugging logging mode at the bottom right of the page and specify a non-standard web socket address.
 
 ![settings](https://user-images.githubusercontent.com/13550539/130320607-a493a5df-bbcc-4fb0-a82b-046db45bc952.png)
 
-Настройки сохраняются в Local Storage браузера и не пропадают после обновления страницы. Чтобы сбросить настройки удалите ключи из Local Storage с помощью Chrome Dev Tools —> Вкладка Application —> Local Storage.
+The settings are saved in the browser's Local Storage and are not lost when the page is refreshed. To reset the settings, remove the keys from Local Storage using Chrome Dev Tools -> Application tab -> Local Storage.
 
-Если что-то работает не так, как ожидалось, то начните с включения отладочного режима логгирования.
+If something is not working as expected, start by enabling debug logging mode.
 
-## Формат данных
+### Data format
 
-Фронтенд ожидает получить от сервера JSON сообщение со списком автобусов:
+Example of json message for browser (with the list of buses):
 
 ```json
 {
@@ -34,9 +69,9 @@
 }
 ```
 
-Те автобусы, что не попали в список `buses` последнего сообщения от сервера будут удалены с карты.
+Those buses that were not in the list of `buses` of the last message from the server will be removed from the map.
 
-Фронтенд отслеживает перемещение пользователя по карте и отправляет на сервер новые координаты окна:
+The frontend tracks the user's movement on the map and sends the new window coordinates to the server:
 
 ```json
 {
@@ -50,14 +85,16 @@
 }
 ```
 
+### Lint
 
+```shell
+flake8
+```
 
-## Используемые библиотеки
+### Testing
 
-- [Leaflet](https://leafletjs.com/) — отрисовка карты
-- [loglevel](https://www.npmjs.com/package/loglevel) для логгирования
+For testing purpose use `harmful_clients.py` running against `server.py`
 
-
-## Цели проекта
-
-Код написан в учебных целях — это урок в курсе по Python и веб-разработке на сайте [Devman](https://dvmn.org).
+```shell
+python harmful_clients.py
+```

@@ -9,10 +9,6 @@ class Bus:
     lng: float
     route: str
 
-    @classmethod
-    def from_json(cls, encoded_bus):
-        return cls(**json.loads(encoded_bus))
-
 
 @dataclass
 class WindowBounds:
